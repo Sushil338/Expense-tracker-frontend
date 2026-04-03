@@ -341,7 +341,7 @@ function App() {
                 </div>
                 <div className="flex items-center gap-1 text-gray-700 font-bold">
                   <IndianRupee size={16} />
-                  <span>{summary.dailyAverage.toFixed(2)} / day</span>
+                  <span>{summary.dailyAverage.toFixed(2)} / day(Limit)</span>
                 </div>
               </div>
               <div className="w-full h-3 bg-gray-100 rounded-full overflow-hidden">
