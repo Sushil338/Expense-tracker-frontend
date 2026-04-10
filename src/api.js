@@ -55,7 +55,7 @@ export const getCurrentUser = () => {
 };
 
 export const addExtraBudget = (data) => {
-  return API.post('/auth/extra-budget', data);
+  return API.post('/budget/extra-budget', data);
 };
 
 export default API;
