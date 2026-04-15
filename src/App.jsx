@@ -7,20 +7,27 @@ import FilterBar from './components/FilterBar';
 import API, { setAuthToken, updateUser, getCurrentUser, addExtraBudget } from './api';
 import { Wallet, LogOut, Plus, Pencil, Trash2, IndianRupee } from 'lucide-react';
 
+
+/** * Helper: Returns a clean state object for budget calculations.
+ * Prevents "undefined" errors on first render.
+ */
+const createDefaultMonthlyOverview = () => ({
+  currentMonthSpent: 0,
+  monthlyBudget: 0,
+  extraBudget: 0,
+  totalAvailableBudget: 0,
+  remainingBudget: 0,
+  budgetUsedPercentage: 0
+});
+
 function App() {
+  // STATE MANAGEMENT
   const [user, setUser] = useState(null);
   const [isRegistering, setIsRegistering] = useState(false);
   const [expenses, setExpenses] = useState([]);
   const [summary, setSummary] = useState({ dailyAverage: 0 });
   const [totalSpent, setTotalSpent] = useState(0);
-  const [monthlyOverview, setMonthlyOverview] = useState({
-    currentMonthSpent: 0,
-    monthlyBudget: 0,
-    extraBudget: 0,
-    totalAvailableBudget: 0,
-    remainingBudget: 0,
-    budgetUsedPercentage: 0
-  });
+  const [monthlyOverview, setMonthlyOverview] = useState(createDefaultMonthlyOverview);
   const [chartData, setChartData] = useState([]);
   const [loading, setLoading] = useState(false);
   const [isFormOpen, setIsFormOpen] = useState(false);
@@ -30,15 +37,44 @@ function App() {
   const [isExtraBudgetOpen, setIsExtraBudgetOpen] = useState(false);
   const [extraBudgetAmount, setExtraBudgetAmount] = useState('');
 
-  // Filter State
+  // Filter State: Controls what data the API returns
   const [filter, setFilter] = useState("ALL");
   const [startDate, setStartDate] = useState("");
   const [endDate, setEndDate] = useState("");
 
+  // Profile Modal State
   const [isProfileOpen, setIsProfileOpen] = useState(false);
   const [profileData, setProfileData] = useState({ username: '', email: '', password: '', monthlyBudget: '' });
 
+  /**
+   * Cleans UI state when user logs out to prevent data leaking between sessions.
+   */
+  const resetDashboardState = () => {
+    setExpenses([]);
+    setSummary({ dailyAverage: 0 });
+    setTotalSpent(0);
+    setMonthlyOverview(createDefaultMonthlyOverview());
+    setChartData([]);
+    setLoading(false);
+    setIsFormOpen(false);
+    setSelectedExpense(null);
+    setActivitySearch('');
+    setIsExtraBudgetOpen(false);
+    setExtraBudgetAmount('');
+    setIsProfileOpen(false);
+  };
+
+  const handleLogout = () => {
+    localStorage.clear(); // Wipe tokens and IDs
+    setAuthToken(null); // Remove header from API instance
+    resetDashboardState();
+    setUser(null);
+  };
+
+
+  // --- AUTHENTICATION LOGIC (On Mount) ---
   useEffect(() => {
+    // 1. Check if we just redirected from OAuth (Google)
     const params = new URLSearchParams(window.location.search);
     const oauthToken = params.get('token');
     const oauthUsername = params.get('username');
@@ -55,21 +91,24 @@ function App() {
         localStorage.setItem('userId', oauthUserId);
       }
 
+      // Clean the URL (remove sensitive tokens from address bar)
       window.history.replaceState({}, document.title, window.location.pathname);
     }
 
+    // 2. Initialize Auth from LocalStorage
     const token = localStorage.getItem('token');
     const savedUsername = localStorage.getItem('username');
     const savedUserId = localStorage.getItem('userId');
 
     if (!token) return;
 
-    setAuthToken(token);
+    setAuthToken(token); // Set Bearer token for axios
 
     if (savedUsername) {
       setUser({ username: savedUsername, id: savedUserId });
     }
 
+    // 3. Verify token with server and get fresh user data
     const fetchCurrentUser = async () => {
       try {
         const res = await getCurrentUser();
@@ -87,7 +126,27 @@ function App() {
 
     fetchCurrentUser();
   }, []);
+  // --- AUTHENTICATION LOGIC END ---
 
+
+  /**
+   * Global event listener for logout. 
+   * Useful if an API interceptor detects an expired token (401).
+   */
+  useEffect(() => {
+    const handleAuthLogout = () => {
+      setAuthToken(null);
+      resetDashboardState();
+      setUser(null);
+    };
+
+    window.addEventListener('auth:logout', handleAuthLogout);
+
+    return () => window.removeEventListener('auth:logout', handleAuthLogout);
+  }, []);
+
+
+  // Sync profile form data with user state when profile modal opens
   useEffect(() => {
     if (!isProfileOpen || !user) return;
 
@@ -105,6 +164,9 @@ function App() {
     setEndDate(end);
   };
 
+
+  // --- CORE DATA FETCHING ---
+  // Runs whenever user changes, refreshTrigger increments, or filters update
   useEffect(() => {
     if (!user) return;
 
@@ -118,6 +180,7 @@ function App() {
           url += `?start=${startDate}T00:00:00&end=${endDate}T23:59:59`;
         }
 
+        // Fetch dashboard (expenses/charts) and monthly limits in parallel
         const [dashboardRes, monthlyRes] = await Promise.all([
           API.get(url),
           API.get('/budget/monthly-overview')
@@ -144,7 +207,9 @@ function App() {
 
     fetchDashboardData();
   }, [user, refreshTrigger, filter, startDate, endDate]);
+  // --- CORE DATA FETCHING END ---
 
+  // --- ACTION HANDLERS ---
   const handleExpenseAdded = () => {
     setRefreshTrigger(t => t + 1);
     setIsFormOpen(false);
@@ -173,12 +238,6 @@ function App() {
       console.error("Delete Error:", err);
       alert(err.response?.data || "Unable to delete expense");
     }
-  };
-
-  const handleLogout = () => {
-    localStorage.clear();
-    setAuthToken(null);
-    setUser(null);
   };
 
   const handleProfileChange = (e) => setProfileData({ ...profileData, [e.target.name]: e.target.value });
@@ -232,6 +291,7 @@ function App() {
     }
   };
 
+  // --- RENDER HELPERS ---
   const formatCurrency = (value) => `Rs ${Number(value || 0).toFixed(2)}`;
 
   const formatExpenseDate = (value) => {
@@ -246,6 +306,7 @@ function App() {
     return date.toLocaleDateString();
   };
 
+  // Frontend filtering: Search within the currently loaded expense list
   const filteredExpenses = expenses.filter((exp) => {
     const searchValue = activitySearch.trim().toLowerCase();
 
@@ -257,6 +318,8 @@ function App() {
     return description.includes(searchValue) || category.includes(searchValue);
   });
 
+
+  // Auth Guard: If no user, show Login/Register screens
   if (!user) return isRegistering ? (
     <Register onBackToLogin={() => setIsRegistering(false)} />
   ) : (
@@ -266,6 +329,7 @@ function App() {
   return (
     <div className="min-h-screen bg-gray-50 pb-20 font-sans p-6">
       <div className="max-w-6xl mx-auto">
+        {/* Header Section */}
         <header className="flex justify-between items-center mb-8 bg-white p-6 rounded-3xl shadow-sm border">
           <div>
             <h1 className="text-2xl font-black text-gray-800">Budgeter</h1>
@@ -281,11 +345,14 @@ function App() {
           </div>
         </header>
 
+        {/* Date Filters */}
         <FilterBar onApply={handleApplyFilter} currentFilter={filter} />
 
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+          {/* Main Dashboard Column */}
           <div className="lg:col-span-2 space-y-6">
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+              {/* Total Spent Card */}
               <div className="bg-blue-600 text-white p-8 rounded-3xl shadow-lg shadow-blue-200">
                 <Wallet size={30} />
                 <p className="text-blue-100 text-sm mt-4 uppercase tracking-wider font-semibold">
@@ -295,11 +362,13 @@ function App() {
                   {formatCurrency(totalSpent)}
                 </h2>
               </div>
+              {/* Add Expense Trigger */}
               <div onClick={handleAddExpenseClick} className="border-2 border-dashed border-gray-300 p-8 rounded-3xl cursor-pointer flex items-center justify-center hover:bg-blue-50 transition-all text-gray-400 group">
                 <Plus size={40} className="group-hover:scale-110 transition-transform" />
               </div>
             </div>
-
+            
+            {/* Quick Stats Grid */}
             <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
               <div className="bg-white p-5 rounded-3xl shadow-sm border">
                 <p className="text-sm font-bold text-gray-500">This Month</p>
@@ -332,7 +401,8 @@ function App() {
                 </h3>
               </div>
             </div>
-
+            
+            {/* Visual Progress Bar */}
             <div className="bg-white p-5 rounded-3xl shadow-sm border">
               <div className="flex justify-between items-center mb-3">
                 <div>
@@ -344,6 +414,8 @@ function App() {
                   <span>{summary.dailyAverage.toFixed(2)} / day(Limit)</span>
                 </div>
               </div>
+
+              {/* Progress bar logic: red if budget exceeded, blue if safe */}
               <div className="w-full h-3 bg-gray-100 rounded-full overflow-hidden">
                 <div
                   className={`h-full rounded-full ${monthlyOverview.remainingBudget < 0 ? 'bg-red-500' : 'bg-blue-600'}`}
@@ -355,11 +427,13 @@ function App() {
               </p>
             </div>
 
+            {/* Spending Chart Visualization */}
             <div className="bg-white p-8 rounded-3xl shadow-sm border min-h-[400px]">
               <SpendingChart data={chartData} />
             </div>
           </div>
 
+          {/* Right Sidebar: Recent Activity */}
           <div className="bg-white p-6 rounded-3xl shadow-sm border">
             <div className="flex justify-between items-center mb-4">
               <h2 className="font-black text-lg text-gray-800">Activity</h2>
@@ -372,6 +446,7 @@ function App() {
               placeholder="Search expense"
               className="w-full p-3 mb-4 bg-gray-50 border rounded-xl outline-none focus:ring-2 focus:ring-blue-500"
             />
+            {/* List renders top 10 filtered expenses */}
             <div className="space-y-4">
               {loading ? (
                 <p className="text-center text-gray-400 py-10">Loading...</p>
@@ -406,6 +481,8 @@ function App() {
           </div>
         </div>
 
+
+        {/* ExpenseForm: Shared for adding and editing */}
         {isFormOpen && (
           <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex justify-center items-center z-50 p-4">
             <ExpenseForm
@@ -419,6 +496,7 @@ function App() {
           </div>
         )}
 
+        {/* ExtraBudget: For one-time monthly top-ups */}
         {isExtraBudgetOpen && (
           <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex justify-center items-center z-50 p-4">
             <div className="bg-white p-8 rounded-3xl w-full max-w-sm shadow-2xl">
@@ -441,6 +519,7 @@ function App() {
           </div>
         )}
 
+        {/* ProfileUpdate: To change user settings */}
         {isProfileOpen && (
           <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex justify-center items-center z-50 p-4">
             <div className="bg-white p-8 rounded-3xl w-full max-w-sm shadow-2xl">

@@ -1,22 +1,28 @@
 import React, { useEffect, useState } from 'react';
 import API, { setAuthToken } from '../api';
-import { Lock, User, AlertCircle, ArrowRight } from 'lucide-react';
+import { Lock, Eye, EyeOff, User, AlertCircle, ArrowRight } from 'lucide-react';
 
 const Login = ({ onLoginSuccess, onGoToRegister }) => {
     const [credentials, setCredentials] = useState({ username: '', password: '' });
     const [error, setError] = useState('');
     const [loading, setLoading] = useState(false);
+    const [showPassword, setShowPassword] = useState(false);
 
     useEffect(() => {
         const params = new URLSearchParams(window.location.search);
         const oauthError = params.get('oauthError');
+        const authError = sessionStorage.getItem('authError');
 
-        if (!oauthError) {
+        if (oauthError) {
+            setError(oauthError);
+            window.history.replaceState({}, document.title, window.location.pathname);
             return;
         }
 
-        setError(oauthError);
-        window.history.replaceState({}, document.title, window.location.pathname);
+        if (authError) {
+            setError(authError);
+            sessionStorage.removeItem('authError');
+        }
     }, []);
 
     const handleChange = (e) => {
@@ -84,7 +90,7 @@ const Login = ({ onLoginSuccess, onGoToRegister }) => {
                             Username
                         </label>
                         <div className="relative">
-                            <span className="absolute left-3 top-2.5 text-gray-400">
+                            <span className="absolute left-3 top-3.5 text-gray-400">
                                 <User size={18} />
                             </span>
                             <input
@@ -104,18 +110,24 @@ const Login = ({ onLoginSuccess, onGoToRegister }) => {
                             Password
                         </label>
                         <div className="relative">
-                            <span className="absolute left-3 top-2.5 text-gray-400">
+                            <span className="absolute left-3 top-3.5 text-gray-400">
                                 <Lock size={18} />
                             </span>
                             <input
                                 name="password"
-                                type="password"
+                                type={showPassword ? "text" : "password"}
                                 required
                                 value={credentials.password}
                                 onChange={handleChange}
                                 className="w-full pl-10 pr-3 py-2.5 border rounded-lg"
                                 placeholder="Enter password"
                             />
+                            <span
+                                className="absolute right-3 top-3.5 text-gray-400 cursor-pointer"
+                                onClick={() => setShowPassword(!showPassword)}
+                            >
+                                {showPassword ? <EyeOff size={18} /> : <Eye size={18} />}
+                            </span>
                         </div>
                     </div>
 

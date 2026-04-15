@@ -1,6 +1,7 @@
 import axios from 'axios';
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8080/api';
+const SESSION_EXPIRED_MESSAGE = 'Your session expired. Please log in again.';
 
 // Create Axios instance
 const API = axios.create({
@@ -9,6 +10,13 @@ const API = axios.create({
     'Content-Type': 'application/json',
   },
 });
+
+const clearStoredAuth = () => {
+  localStorage.removeItem('token');
+  localStorage.removeItem('username');
+  localStorage.removeItem('userId');
+  delete API.defaults.headers.common['Authorization'];
+};
 
 // Attach JWT token automatically
 API.interceptors.request.use(
@@ -26,11 +34,18 @@ API.interceptors.request.use(
 API.interceptors.response.use(
   (response) => response,
   (error) => {
-    if (error.response && error.response.status === 401) {
+    const status = error.response?.status;
+    const requestUrl = error.config?.url || '';
+    const hasActiveToken = Boolean(localStorage.getItem('token'));
+    const isLoginRequest = requestUrl.includes('/auth/login');
+
+    if (status === 401 && hasActiveToken && !isLoginRequest) {
       console.warn("Session expired. Logging out...");
-      localStorage.removeItem('token');
-      localStorage.removeItem('username');
-      localStorage.removeItem('userId');
+      clearStoredAuth();
+      sessionStorage.setItem('authError', SESSION_EXPIRED_MESSAGE);
+      window.dispatchEvent(new CustomEvent('auth:logout', {
+        detail: { reason: 'session-expired' }
+      }));
     }
     return Promise.reject(error);
   }
